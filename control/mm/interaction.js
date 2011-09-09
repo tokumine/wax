@@ -100,13 +100,14 @@ wax.mm.interaction = function(map, tilejson, options) {
 
         if (tile) waxGM.getGrid(tile.src, function(err, g) {
             if (err || !g) return;
-            if (feature = g.tileFeature(pos.x, pos.y, tile, {
+            feature = g.tileFeature(pos.x, pos.y, tile, {
                 format: 'teaser'
-            })) {
+            });
+            if (feature) {
                 if (feature && _af !== feature) {
                     _af = feature;
                     callbacks.out(map.parent);
-                    callbacks.over(feature, map.parent, 0, e);
+                    callbacks.over(feature, map.parent);
                 } else if (!feature) {
                     _af = null;
                     callbacks.out(map.parent);
@@ -160,26 +161,26 @@ wax.mm.interaction = function(map, tilejson, options) {
 
     function onUp(e) {
         var pos = wax.util.eventoffset(e);
+        _downLock = false;
 
         MM.removeEvent(document.body, 'mouseup', onUp);
+
         if (map.parent.ontouchend) {
             MM.removeEvent(map.parent, 'touchend', onUp);
             MM.removeEvent(map.parent, 'touchmove', _touchCancel);
         }
 
-        _downLock = false;
         if (e.type === 'touchend') {
             // If this was a touch and it survived, there's no need to avoid a double-tap
             click(e, _d);
         } else if (Math.round(pos.y / tol) === Math.round(_d.y / tol) &&
             Math.round(pos.x / tol) === Math.round(_d.x / tol)) {
             // Contain the event data in a closure.
-            _clickTimeout = window.setTimeout((function(pos) {
-                return function(e) {
+            _clickTimeout = window.setTimeout(
+                function() {
                     _clickTimeout = null;
                     click(e, pos);
-                };
-            })(pos), 300);
+                }, 300);
         }
         return onUp;
     }
@@ -191,9 +192,10 @@ wax.mm.interaction = function(map, tilejson, options) {
 
         if (tile) waxGM.getGrid(tile.src, function(err, g) {
             for (var i = 0; g && i < clickAction.length; i++) {
-                if (feature = g.tileFeature(pos.x, pos.y, tile, {
+                feature = g.tileFeature(pos.x, pos.y, tile, {
                     format: clickAction[i]
-                })) {
+                });
+                if (feature) {
                     switch (clickAction[i]) {
                         case 'full':
                         // clickAction can be teaser in touch interaction

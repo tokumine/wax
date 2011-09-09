@@ -1,4 +1,4 @@
-/* wax - 3.0.6 - 1.0.4-380-g06e93bd */
+/* wax - 3.0.7 - 1.0.4-388-gbb165b0 */
 
 
 /*!
@@ -613,9 +613,9 @@ wax.tooltip.prototype.isPopup = function(el) {
 
 // Get the active tooltip for a layer or create a new one if no tooltip exists.
 // Hide any tooltips on layers underneath this one.
-wax.tooltip.prototype.getTooltip = function(feature, context, index, evt) {
+wax.tooltip.prototype.getTooltip = function(feature, context) {
     var tooltip = document.createElement('div');
-    tooltip.className = 'wax-tooltip wax-tooltip-' + index;
+    tooltip.className = 'wax-tooltip wax-tooltip-0';
     tooltip.innerHTML = feature;
     context.appendChild(tooltip);
     return tooltip;
@@ -624,16 +624,20 @@ wax.tooltip.prototype.getTooltip = function(feature, context, index, evt) {
 // Hide a given tooltip.
 wax.tooltip.prototype.hideTooltip = function(el) {
     if (!el) return;
-    var event;
-    var remove = function() {
+    var event,
+        remove = function() {
         if (this.parentNode) this.parentNode.removeChild(this);
     };
+
     if (el.style['-webkit-transition'] !== undefined && this.animationOut) {
         event = 'webkitTransitionEnd';
     } else if (el.style.MozTransition !== undefined && this.animationOut) {
         event = 'transitionend';
     }
+
     if (event) {
+        // This code assumes that transform-supporting browsers
+        // also support proper events. IE9 does both.
         el.addEventListener(event, remove, false);
         el.addEventListener('transitionend', remove, false);
         el.className += ' ' + this.animationOut;
@@ -644,15 +648,22 @@ wax.tooltip.prototype.hideTooltip = function(el) {
 
 // Expand a tooltip to be a "popup". Suspends all other tooltips from being
 // shown until this popup is closed or another popup is opened.
-wax.tooltip.prototype.click = function(feature, context, index) {
+wax.tooltip.prototype.click = function(feature, context) {
     // Hide any current tooltips.
-    this.unselect(context);
+    if (this._currentTooltip) {
+        this.hideTooltip(this._currentTooltip);
+        this._currentTooltip = undefined;
+    }
 
-    var tooltip = this.getTooltip(feature, context, index);
+    var tooltip = this.getTooltip(feature, context);
+    tooltip.className += ' wax-popup';
+    tooltip.innerHTML = feature;
+
     var close = document.createElement('a');
     close.href = '#close';
     close.className = 'close';
     close.innerHTML = 'Close';
+    tooltip.appendChild(close);
 
     var closeClick = wax.util.bind(function(ev) {
         this.hideTooltip(tooltip);
@@ -662,6 +673,7 @@ wax.tooltip.prototype.click = function(feature, context, index) {
         if (ev.preventDefault) ev.preventDefault();
         return false;
     }, this);
+
     // IE compatibility.
     if (close.addEventListener) {
         close.addEventListener('click', closeClick, false);
@@ -669,37 +681,34 @@ wax.tooltip.prototype.click = function(feature, context, index) {
         close.attachEvent('onclick', closeClick);
     }
 
-    tooltip.className += ' wax-popup';
-    tooltip.innerHTML = feature;
-    tooltip.appendChild(close);
     this._currentTooltip = tooltip;
 };
 
 // Show a tooltip.
-wax.tooltip.prototype.select = function(feature, context, layer_id, evt) {
+wax.tooltip.prototype.over = function(feature, context) {
     if (!feature) return;
-    if (this.isPopup(this._currentTooltip)) return;
-
-    this._currentTooltip = this.getTooltip(feature, context, layer_id, evt);
     context.style.cursor = 'pointer';
+
+    if (this.isPopup(this._currentTooltip)) {
+        return;
+    } else {
+        this._currentTooltip = this.getTooltip(feature, context);
+    }
 };
 
 
 // Hide all tooltips on this layer and show the first hidden tooltip on the
 // highest layer underneath if found.
-wax.tooltip.prototype.unselect = function(context) {
-    if (this.isPopup(this._currentTooltip)) return;
-
+wax.tooltip.prototype.out = function(context) {
     context.style.cursor = 'default';
-    if (this._currentTooltip) {
+
+    if (this.isPopup(this._currentTooltip)) {
+        return;
+    } else if (this._currentTooltip) {
         this.hideTooltip(this._currentTooltip);
         this._currentTooltip = undefined;
     }
 };
-
-wax.tooltip.prototype.out = wax.tooltip.prototype.unselect;
-wax.tooltip.prototype.over = wax.tooltip.prototype.select;
-wax.tooltip.prototype.click = wax.tooltip.prototype.click;
 var wax = wax || {};
 wax.util = wax.util || {};
 
@@ -1349,13 +1358,14 @@ wax.mm.interaction = function(map, tilejson, options) {
 
         if (tile) waxGM.getGrid(tile.src, function(err, g) {
             if (err || !g) return;
-            if (feature = g.tileFeature(pos.x, pos.y, tile, {
+            feature = g.tileFeature(pos.x, pos.y, tile, {
                 format: 'teaser'
-            })) {
+            });
+            if (feature) {
                 if (feature && _af !== feature) {
                     _af = feature;
                     callbacks.out(map.parent);
-                    callbacks.over(feature, map.parent, 0, e);
+                    callbacks.over(feature, map.parent);
                 } else if (!feature) {
                     _af = null;
                     callbacks.out(map.parent);
@@ -1409,26 +1419,26 @@ wax.mm.interaction = function(map, tilejson, options) {
 
     function onUp(e) {
         var pos = wax.util.eventoffset(e);
+        _downLock = false;
 
         MM.removeEvent(document.body, 'mouseup', onUp);
+
         if (map.parent.ontouchend) {
             MM.removeEvent(map.parent, 'touchend', onUp);
             MM.removeEvent(map.parent, 'touchmove', _touchCancel);
         }
 
-        _downLock = false;
         if (e.type === 'touchend') {
             // If this was a touch and it survived, there's no need to avoid a double-tap
             click(e, _d);
         } else if (Math.round(pos.y / tol) === Math.round(_d.y / tol) &&
             Math.round(pos.x / tol) === Math.round(_d.x / tol)) {
             // Contain the event data in a closure.
-            _clickTimeout = window.setTimeout((function(pos) {
-                return function(e) {
+            _clickTimeout = window.setTimeout(
+                function() {
                     _clickTimeout = null;
                     click(e, pos);
-                };
-            })(pos), 300);
+                }, 300);
         }
         return onUp;
     }
@@ -1440,9 +1450,10 @@ wax.mm.interaction = function(map, tilejson, options) {
 
         if (tile) waxGM.getGrid(tile.src, function(err, g) {
             for (var i = 0; g && i < clickAction.length; i++) {
-                if (feature = g.tileFeature(pos.x, pos.y, tile, {
+                feature = g.tileFeature(pos.x, pos.y, tile, {
                     format: clickAction[i]
-                })) {
+                });
+                if (feature) {
                     switch (clickAction[i]) {
                         case 'full':
                         // clickAction can be teaser in touch interaction
@@ -1803,6 +1814,10 @@ wax.mm.pointselector = function(map, tilejson, opts) {
         callback(cleanLocations(locations));
     };
 
+    pointselector.locations = function(x) {
+        return locations;
+    };
+
     pointselector.add = function(map) {
         MM.addEvent(map.parent, 'mousedown', mouseDown);
         map.addCallback('drawn', drawPoints);
@@ -1812,7 +1827,7 @@ wax.mm.pointselector = function(map, tilejson, opts) {
     pointselector.remove = function(map) {
         MM.removeEvent(map.parent, 'mousedown', mouseDown);
         map.removeCallback('drawn', drawPoints);
-        for (var i = 0; i < locations.length; i++) {
+        for (var i = locations.length - 1; i > -1; i--) {
             pointselector.deleteLocation(locations[i]);
         }
         return this;
