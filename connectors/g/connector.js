@@ -21,6 +21,7 @@ wax.g.connector = function(options) {
     this.options = {
         tiles: options.tiles,
         scheme: options.scheme || 'xyz',
+        cache_buster: options.cache_buster || function(){},
         blankImage: options.blankImage
     };
 
@@ -77,5 +78,6 @@ wax.g.connector.prototype.getTileUrl = function(coord, z) {
             this.options.tiles.length]
                 .replace('{z}', z)
                 .replace('{x}', x)
-                .replace('{y}', y);
+                .replace('{y}', y)
+                .replace('{cache}', this.options.cache_buster());
 };
